@@ -1,14 +1,17 @@
 import tensorflow as tf
 import numpy as np
 
+
 class ImputationLayer(tf.keras.layers.Layer):
     def __init__(self, A_init):
         super(ImputationLayer, self).__init__()
         self.A = self.add_weight(
             "A", shape=A_init.shape, initializer=tf.constant_initializer(A_init))
+
     def call(self, X, W):
         W = tf.cast(W, X.dtype)
         return X * W + self.A * (1.0 - W)
+
 
 class RnnDecodeTransformLayer(tf.keras.layers.Layer):
     def __init__(self, n_hidden, I):
@@ -19,11 +22,13 @@ class RnnDecodeTransformLayer(tf.keras.layers.Layer):
             "weight", shape=[n_hidden, I], initializer=tf.initializers.glorot_uniform())
         self.bias = self.add_weight(
             "bias", shape=[I], initializer=tf.initializers.glorot_uniform())
+
     def call(self, rnn_output, batch_size):
         # rnn_output = tf.transpose(rnn_output, perm=[1, 0, 2])
         # rnn_output = tf.transpose(a=tf.stack(rnn_output), perm=[1, 0, 2])
         weight = tf.tile(tf.expand_dims(self.weight, 0), [batch_size, 1, 1])
         return tf.matmul(rnn_output, weight) + self.bias
+
 
 class GmmLayer(tf.keras.layers.Layer):
     def __init__(self, n_hidden, K):
@@ -34,11 +39,13 @@ class GmmLayer(tf.keras.layers.Layer):
             "sigma2_c_unscaled", shape=[K, n_hidden], initializer=tf.initializers.glorot_uniform())
         self.phi_c_unscaled = self.add_weight(
             "phi_c_unscaled", shape=[K], initializer=tf.initializers.glorot_uniform())
+
     def call(self, _):
         mu_c = self.mu_c_unscaled
         sigma2_c = tf.nn.softplus(self.sigma2_c_unscaled, name="sigma2_c")
         phi_c = tf.nn.softmax(self.phi_c_unscaled, name="phi_c")
         return mu_c, sigma2_c, phi_c
+
 
 class VaderModel(tf.keras.Model):
     def __init__(self, X, W, D, K, I, cell_type, n_hidden, recurrent, output_activation):
@@ -50,6 +57,7 @@ class VaderModel(tf.keras.Model):
         self.n_hidden = n_hidden
         self.recurrent = recurrent
         self.output_activation = output_activation
+
         def initialize_imputation(X, W):
             # average per time point, variable
             W_A = np.sum(W, axis=0)
@@ -87,7 +95,8 @@ class VaderModel(tf.keras.Model):
                 self.mu_layer = tf.keras.layers.Dense(n_hidden[-1], activation=None, name="mu_tilde")
                 self.log_sigma2_layer = tf.keras.layers.Dense(n_hidden[-1], activation=None, name="log_sigma2_tilde")
                 self.rnn_transform_layer = RnnDecodeTransformLayer(n_hidden[0], I)
-                self.ae_decode_layers = [tf.keras.layers.Dense(n, activation=tf.nn.softplus) for n in (n_hidden[:-1])[::-1]]
+                self.ae_decode_layers = [tf.keras.layers.Dense(n, activation=tf.nn.softplus) for n in
+                                         (n_hidden[:-1])[::-1]]
             else:
                 n_hidden = n_hidden[0]
                 if cell_type == "LSTM":
@@ -114,12 +123,13 @@ class VaderModel(tf.keras.Model):
             self.log_sigma2_layer = tf.keras.layers.Dense(n_hidden[-1], activation=None, name="log_sigma2_tilde")
             self.ae_decode_layers = [tf.keras.layers.Dense(n, activation=tf.nn.softplus) for n in (n_hidden[:-1])[::-1]]
             self.x_raw_layer = tf.keras.layers.Dense(D, activation=None, name="x_raw")
+
     @tf.function
     def encode(self, X, W):
         X_imputed = self.imputation_layer(X, W)
         if self.recurrent:
             # X_imputed = [tf.squeeze(t, [1]) for t in tf.split(X_imputed, self.D, 1)]
-            hidden = self.encoder_rnn(X_imputed)[-1] # [1] ???
+            hidden = self.encoder_rnn(X_imputed)[-1]  # [1] ???
         else:
             hidden = X_imputed
         if len(self.n_hidden) > 1:

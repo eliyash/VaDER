@@ -1,31 +1,30 @@
 import tensorflow as tf
-from functools import partial
 from scipy.optimize import linear_sum_assignment as linear_assignment
 from sklearn import metrics
 from scipy.stats import multivariate_normal
 import sys
-import os
 import numpy as np
 import warnings
 from sklearn.mixture import GaussianMixture
 from vadermodel import VaderModel
 
+
 class VADER:
-    '''
+    """
         A VADER object represents a (recurrent) (variational) (Gaussian mixture) autoencoder
-    '''
-    def __init__(self, X_train, W_train=None, y_train=None, n_hidden=[12, 2], k=3, groups=None, output_activation=None,
-        batch_size = 32, learning_rate=1e-3, alpha=1.0, phi=None, cell_type="LSTM", recurrent=True,
-        save_path=None, eps=1e-10, seed=None, n_thread=0):
-        '''
+    """
+    def __init__(self, x_train, w_train=None, y_train=None, n_hidden=None, k=3, groups=None, output_activation=None,
+                 batch_size = 32, learning_rate=1e-3, alpha=1.0, phi=None, cell_type="LSTM", recurrent=True,
+                 save_path=None, eps=1e-10, seed=None, n_thread=0):
+        """
             Constructor for class VADER
 
             Parameters
             ----------
-            X_train : float
+            x_train : np.ndarray
                 The data to be clustered. Numpy array with dimensions [samples, time points, variables] if recurrent is
                 True, else [samples, variables].
-            W_train : integer
+            w_train : np.ndarray
                 Missingness indicator. Numpy array with same dimensions as X_train. Entries in X_train for which the
                 corresponding entry in W_train equals 0 are treated as missing. More precisely, their specific numeric
                 value is completely ignored. If None, then no missingness is assumed. (default: None)
@@ -33,7 +32,7 @@ class VADER:
                 Cluster labels. Numpy array or list of length X_train.shape[0]. y_train is used purely for monitoring
                 performance when a ground truth clustering is available. It does not affect training, and can be omitted
                  if no ground truth is available. (default: None)
-            n_hidden : int
+            n_hidden : List[int]
                 The hidden layers. List of length >= 1. Specification of the number of nodes in the hidden layers. For
                 example, specifying [a, b, c] will lead to an architecture with layer sizes a -> b -> c -> b -> a.
                 (default: [12, 2])
@@ -42,7 +41,7 @@ class VADER:
             groups : int
                 Grouping of the input variables as a list of length X.shape[2], with integers {0, 1, 2, ...} denoting
                 groups; used for weighting proportional to group size. (default: None)
-            output_activation : str
+            output_activation : Optional[str]
                 Output activation function, "sigmoid" for binary output, None for continuous output. (default: None)
             batch_size : int
                 Batch size used for training. (default: 32)
@@ -134,18 +133,21 @@ class VADER:
                 The VaDER model
             optimizer :
                 The optimizer used for training the model
-        '''
+        """
+
+        if n_hidden is None:
+            n_hidden = [12, 2]
 
         if seed is not None:
             np.random.seed(seed)
 
         # experiment: encode as np.array
-        self.D = np.array(X_train.shape[1], dtype=np.int32)  # dimensionality of input/output
-        self.X = X_train.astype(np.float32)
-        if W_train is not None:
-            self.W = W_train.astype(np.int32)
+        self.D = np.array(x_train.shape[1], dtype=np.int32)  # dimensionality of input/output
+        self.X = x_train.astype(np.float32)
+        if w_train is not None:
+            self.W = w_train.astype(np.int32)
         else:
-            self.W = np.ones(X_train.shape, np.int32)
+            self.W = np.ones(x_train.shape, np.int32)
         if y_train is not None:
             self.y = np.array(y_train, np.int32)
         else:
@@ -161,8 +163,8 @@ class VADER:
             self.G = self.G / sum(self.G)
             self.G = np.broadcast_to(self.G, self.X.shape)
         else:
-            self.groups = np.ones(X_train.shape[-1], np.int32)
-            self.G = np.ones(X_train.shape, dtype=np.float32)
+            self.groups = np.ones(x_train.shape[-1], np.int32)
+            self.G = np.ones(x_train.shape, dtype=np.float32)
 
         self.n_hidden = n_hidden  # n_hidden[-1] is dimensions of the mixture distribution (size of hidden layer)
         if output_activation is None:
@@ -186,7 +188,7 @@ class VADER:
         self.recurrent = recurrent
         # experiment: encode as np.array
         if self.recurrent:
-            self.I = np.array(X_train.shape[2], dtype=np.int32)  # multivariate dimensions
+            self.I = np.array(x_train.shape[2], dtype=np.int32)  # multivariate dimensions
         else:
             self.I = np.array(1, dtype=np.int32)
 
@@ -199,8 +201,6 @@ class VADER:
             self.X, self.W, self.D, self.K, self.I, self.cell_type, self.n_hidden, self.recurrent,
             self.output_activation)
 
-
-
         # the state of the untrained model
         self._update_state(self.model)
         self.n_param = np.sum([np.product([xi for xi in x.shape]) for x in self.model.trainable_variables])
@@ -209,7 +209,7 @@ class VADER:
             tf.keras.models.save_model(self.model, self.save_path, save_format="tf")
 
     def fit(self, n_epoch=10, learning_rate=None, verbose=False, exclude_variables=None):
-        '''
+        """
             Train a VADER object.
 
             Parameters
@@ -227,7 +227,7 @@ class VADER:
             Returns
             -------
             0 if successful
-        '''
+        """
 
         @tf.function
         def train_step(X, W, G):
@@ -264,8 +264,13 @@ class VADER:
             tf.keras.models.save_model(self.model, self.save_path, save_format="tf")
         return 0
 
+    def get_clusters_on_x(self):
+        c = list(self.cluster(self.X, self.W))
+        self.counts = [c.count(claster) for claster in range(self.K)]
+        return self.counts
+
     def pre_fit(self, n_epoch=10, learning_rate=None, verbose=False):
-        '''
+        """
             Pre-train a VADER object using only the latent loss, and initialize the Gaussian mixture parameters using
             the resulting latent representation.
 
@@ -282,7 +287,7 @@ class VADER:
             Returns
             -------
             0 if successful
-        '''
+        """
 
         # save the alpha
         alpha = self.alpha
@@ -454,7 +459,7 @@ class VADER:
         return 0
 
     def map_to_latent(self, X_c, W_c=None, n_samp=1):
-        '''
+        """
             Map an input to its latent representation.
 
             Parameters
@@ -472,13 +477,13 @@ class VADER:
             Returns
             -------
             numpy array containing the latent representations.
-        '''
+        """
         if W_c is None:
             W_c = np.ones(X_c.shape, dtype=np.float32)
         return np.concatenate([self.model((X_c, W_c))[5] for i in np.arange(n_samp)], axis=0)
 
     def get_loss(self, X_c, W_c=None, mu_c=None, sigma2_c=None, phi_c=None):
-        '''
+        """
             Calculate the loss for specific input data.
 
             Parameters
@@ -494,7 +499,7 @@ class VADER:
             Returns
             -------
             Dictionary with two components, "reconstruction_loss" and "latent_loss".
-        '''
+        """
         if W_c is None:
             W_c = np.ones(X_c.shape, dtype=np.float32)
 
@@ -510,15 +515,15 @@ class VADER:
         return {"reconstruction_loss": reconstruction_loss_val, "latent_loss": latent_loss_val}
 
     def get_imputation_matrix(self):
-        '''
+        """
             Returns
             -------
             The imputation matrix.
-        '''
+        """
         return self.model.imputation_layer.A
 
     def cluster(self, X_c, W_c=None, mu_c=None, sigma2_c=None, phi_c=None):
-        '''
+        """
             Cluster input data using this VADER object.
 
             Parameters
@@ -534,7 +539,7 @@ class VADER:
             Returns
             -------
             Clusters encoded as integers.
-        '''
+        """
         if W_c is None:
             W_c = np.ones(X_c.shape)
         x, x_raw, mu_c, sigma2_c, phi_c, z, mu_tilde, log_sigma2_tilde = self.model((X_c, W_c))
@@ -542,14 +547,14 @@ class VADER:
         return self._cluster(mu_tilde, mu_c, sigma2_c, phi_c)
 
     def get_cluster_means(self):
-        '''
+        """
             Get the cluster averages represented by this VADER object. Technically, this maps the latent Gaussian
             mixture means to output values using this VADER object.
 
             Returns
             -------
             Cluster averages.
-        '''
+        """
         if self.seed is not None:
             np.random.seed(self.seed)
 
@@ -557,7 +562,7 @@ class VADER:
         return clusters.numpy()
 
     def generate(self, n):
-        '''
+        """
             Generate random samples from this VADER object.
 
             n : int
@@ -566,7 +571,7 @@ class VADER:
             Returns
             -------
             A dictionary with two components, "clusters" (cluster indicator) and "samples" (the random samples).
-        '''
+        """
         if self.seed is not None:
             np.random.seed(self.seed)
 
@@ -592,7 +597,7 @@ class VADER:
         return gen
 
     def predict(self, X_test, W_test=None):
-        '''
+        """
             Map input data to output (i.e. reconstructed input).
 
             Parameters
@@ -606,7 +611,7 @@ class VADER:
             Returns
             -------
             numpy array with reconstructed input (i.e. the autoencoder output).
-        '''
+        """
 
         if W_test is None:
             W_test = np.ones(X_test.shape)
